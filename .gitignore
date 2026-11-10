@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+CLAUDE.local.md
+.claude/settings.local.json
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+dist/
+.DS_Store
