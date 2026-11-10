@@ -13,7 +13,7 @@ One entry per milestone: what I asked Claude Code for, what it produced, and wha
 - **Tests:**
 - **Time taken:**
 
-### M1: backend skeleton (PR link)
+### M1: backend skeleton ([PR #1](https://github.com/posi23/statement-qa/pull/1))
 
 - **Asked for:** a backend skeleton with uv, FastAPI, ruff, pytest and a GitHub Actions workflow, with every dependency listed before adding it.
 - **Plan changes I made:** chose no type checker for now (ruff only).
