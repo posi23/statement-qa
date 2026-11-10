@@ -18,6 +18,16 @@ docs/           PLAN.md, build-log.md
 
 Fill these in as each milestone adds them.
 
+Backend (run from `backend/`; CI runs the same checks in `.github/workflows/backend.yml`):
+
+```
+uv sync                                         # install deps into backend/.venv
+uv run uvicorn statement_qa.main:app --reload   # dev server on :8000
+uv run pytest                                   # tests
+uv run ruff check .                             # lint
+uv run ruff format .                            # format (CI runs --check)
+```
+
 ## How we work
 
 - Plan first. For anything bigger than a small fix, write the plan and wait for my approval before editing files.
