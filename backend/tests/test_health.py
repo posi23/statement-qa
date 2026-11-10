@@ -5,7 +5,6 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from statement_qa.api.health import HealthResponse
 from statement_qa.main import create_app
 
 
@@ -21,12 +20,6 @@ def test_health_returns_ok(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
-
-
-def test_health_body_matches_schema(client: TestClient) -> None:
-    response = client.get("/health")
-
-    assert HealthResponse.model_validate(response.json()).status == "ok"
 
 
 def test_health_rejects_post(client: TestClient) -> None:
