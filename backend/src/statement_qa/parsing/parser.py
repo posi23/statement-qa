@@ -8,17 +8,39 @@ import datetime as dt
 from decimal import Decimal
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from statement_qa.parsing.errors import StatementParseError
 from statement_qa.parsing.layout import (
     Column,
+    HeaderColumn,
     TextPiece,
     assign_cells,
     detect_columns,
     group_rows,
+    normalise_label,
 )
 from statement_qa.parsing.models import ParsedStatement, Transaction
 from statement_qa.parsing.reader import read_pages
 from statement_qa.parsing.values import parse_amount, parse_full_date, parse_row_date
+
+_SUMMARY_LABELS = ("statement period", "opening balance", "closing balance")
+
+# Lines inside the table that carry money but aren't transactions.
+_BALANCE_LINES = frozenset(
+    {
+        "opening balance",
+        "closing balance",
+        "balance brought forward",
+        "balance carried forward",
+        "brought forward",
+        "carried forward",
+        "total",
+        "totals",
+    }
+)
+
+_MONEY_COLUMNS: tuple[Column, ...] = ("amount", "debit", "credit", "balance")
 
 
 def parse_statement_file(path: Path) -> ParsedStatement:
@@ -39,44 +61,52 @@ def parse_statement(pdf: bytes, statement_id: str) -> ParsedStatement:
 
     summary = _read_summary(pages[0])
     period_start, period_end = _parse_period(summary["statement period"])
-    found_table = False
+    columns: list[HeaderColumn] | None = None
     transactions: list[Transaction] = []
     for page_number, rows in enumerate(pages, start=1):
         table = _find_table(rows)
-        if table is None:
+        if table is not None:
+            columns, body = table
+        elif columns is not None:
+            # Many statements print the header on the first page only.
+            body = rows
+        else:
             continue
-        found_table = True
-        columns, body = table
         for row in body:
             transaction = _parse_row(
                 row, columns, page_number, period_start, period_end
             )
             if transaction is not None:
                 transactions.append(transaction)
-    if not found_table:
+    if columns is None:
         raise StatementParseError("no transaction table found")
 
-    return ParsedStatement(
-        statement_id=statement_id,
-        period_start=period_start,
-        period_end=period_end,
-        opening_balance=_amount(summary["opening balance"], "opening balance"),
-        closing_balance=_amount(summary["closing balance"], "closing balance"),
-        page_count=len(pages),
-        transactions=tuple(transactions),
-    )
-
-
-_SUMMARY_LABELS = ("statement period", "opening balance", "closing balance")
+    try:
+        return ParsedStatement(
+            statement_id=statement_id,
+            period_start=period_start,
+            period_end=period_end,
+            opening_balance=_amount(summary["opening balance"], "opening balance"),
+            closing_balance=_amount(summary["closing balance"], "closing balance"),
+            page_count=len(pages),
+            transactions=tuple(transactions),
+        )
+    except ValidationError as error:
+        raise StatementParseError(f"inconsistent statement: {error}") from error
 
 
 def _read_summary(rows: list[list[TextPiece]]) -> dict[str, str]:
-    """Find `Label: value` rows on the first page."""
+    """Find `Label: value` rows on the first page.
+
+    The label and value may be separate strings or one string split at `:`.
+    """
     summary: dict[str, str] = {}
     for row in rows:
-        label = row[0].text.strip().rstrip(":").lower()
-        if label in _SUMMARY_LABELS and len(row) > 1:
-            summary[label] = " ".join(piece.text.strip() for piece in row[1:])
+        label, _, rest = row[0].text.partition(":")
+        parts = [rest, *(piece.text for piece in row[1:])]
+        value = " ".join(part.strip() for part in parts if part.strip())
+        if normalise_label(label) in _SUMMARY_LABELS and value:
+            summary[normalise_label(label)] = value
     missing = [label for label in _SUMMARY_LABELS if label not in summary]
     if missing:
         raise StatementParseError(f"summary is missing: {', '.join(missing)}")
@@ -103,8 +133,8 @@ def _amount(text: str, what: str) -> Decimal:
 
 def _find_table(
     rows: list[list[TextPiece]],
-) -> tuple[dict[Column, float], list[list[TextPiece]]] | None:
-    """Return the header's columns and the rows below it, or None if no table."""
+) -> tuple[list[HeaderColumn], list[list[TextPiece]]] | None:
+    """Return the header's columns and the rows below it, or None if no header."""
     for index, row in enumerate(rows):
         columns = detect_columns(row)
         if columns is not None:
@@ -114,17 +144,30 @@ def _find_table(
 
 def _parse_row(
     row: list[TextPiece],
-    columns: dict[Column, float],
+    columns: list[HeaderColumn],
     page: int,
     period_start: dt.date,
     period_end: dt.date,
 ) -> Transaction | None:
-    """Parse one table row, or return None if its date column holds no date."""
+    """Parse one table row, or return None if it isn't a transaction.
+
+    Rows without a date are skipped only when they're clearly not transactions:
+    no money in them (a footer), or a balance line like `Closing balance`. A
+    row with money and an unreadable date raises, so a transaction is never
+    dropped silently.
+    """
     cells = assign_cells(row, columns)
+    if _is_balance_line(cells):
+        return None
     try:
         date = parse_row_date(cells.get("date", ""), period_start, period_end)
-    except ValueError:
-        return None
+    except ValueError as error:
+        if not _has_money(cells):
+            return None
+        raise StatementParseError(
+            f"page {page}: row with amounts has an unreadable date: "
+            f"{cells.get('date', '')!r}"
+        ) from error
     try:
         return Transaction(
             date=date,
@@ -136,6 +179,25 @@ def _parse_row(
     except ValueError as error:
         # Pydantic's ValidationError is a ValueError too, e.g. an empty description.
         raise StatementParseError(f"page {page}, row dated {date}: {error}") from error
+
+
+def _is_balance_line(cells: dict[Column, str]) -> bool:
+    """True for lines like `Balance brought forward 80.60` that aren't transactions."""
+    return any(
+        normalise_label(cells.get(column, "")) in _BALANCE_LINES
+        for column in ("date", "description")
+    )
+
+
+def _has_money(cells: dict[Column, str]) -> bool:
+    """True if any money column holds a readable amount."""
+    for column in _MONEY_COLUMNS:
+        try:
+            parse_amount(cells.get(column, ""))
+        except ValueError:
+            continue
+        return True
+    return False
 
 
 def _row_amount(cells: dict[Column, str]) -> Decimal:

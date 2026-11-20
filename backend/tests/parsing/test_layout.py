@@ -4,20 +4,22 @@ import pytest
 
 from statement_qa.parsing.layout import (
     Column,
+    HeaderColumn,
     TextPiece,
     assign_cells,
     detect_columns,
     group_rows,
+    normalise_label,
 )
 
 # Header x positions as pypdf reports them for layout A.
-LAYOUT_A: dict[Column, float] = {
-    "date": 42.8,
-    "description": 117.8,
-    "debit": 328.2,
-    "credit": 426.0,
-    "balance": 535.0,
-}
+LAYOUT_A = [
+    HeaderColumn("date", 42.8),
+    HeaderColumn("description", 117.8),
+    HeaderColumn("debit", 328.2),
+    HeaderColumn("credit", 426.0),
+    HeaderColumn("balance", 535.0),
+]
 
 
 def header(*words: str) -> list[TextPiece]:
@@ -26,30 +28,52 @@ def header(*words: str) -> list[TextPiece]:
 
 
 @pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Withdrawals ($)", "withdrawals"),
+        ("Opening Balance:", "opening balance"),
+        ("  Money   OUT ", "money out"),
+        ("Balance (CAD)", "balance"),
+        ("", ""),
+    ],
+)
+def test_normalise_label(text: str, expected: str) -> None:
+    assert normalise_label(text) == expected
+
+
+@pytest.mark.parametrize(
     ("words", "expected"),
     [
         (
             ("Date", "Description", "Withdrawals", "Deposits", "Balance"),
-            {"date", "description", "debit", "credit", "balance"},
+            ["date", "description", "debit", "credit", "balance"],
         ),
         (
             ("Date", "Details", "Amount", "Balance"),
-            {"date", "description", "amount", "balance"},
+            ["date", "description", "amount", "balance"],
         ),
         (
             ("Date", "Transaction", "Debit", "Credit", "Balance"),
-            {"date", "description", "debit", "credit", "balance"},
+            ["date", "description", "debit", "credit", "balance"],
+        ),
+        (
+            ("Date", "Particulars", "Money out ($)", "Money in ($)", "Balance ($)"),
+            ["date", "description", "debit", "credit", "balance"],
+        ),
+        (
+            ("Date", "Ref", "Description", "Paid out", "Paid in", "Balance"),
+            ["date", None, "description", "debit", "credit", "balance"],
         ),
     ],
-    ids=["layout-A", "layout-B", "layout-C"],
+    ids=["layout-A", "layout-B", "layout-C", "units-and-synonyms", "unused-column"],
 )
-def test_detect_columns_recognises_each_layout(
-    words: tuple[str, ...], expected: set[str]
+def test_detect_columns_recognises_header_variants(
+    words: tuple[str, ...], expected: list[str | None]
 ) -> None:
     columns = detect_columns(header(*words))
 
     assert columns is not None
-    assert set(columns) == expected
+    assert [column.name for column in columns] == expected
 
 
 @pytest.mark.parametrize(
@@ -59,6 +83,7 @@ def test_detect_columns_recognises_each_layout(
         ("Date", "Description", "Debit", "Balance"),  # debit without credit
         ("2026-03-09", "City Transit", "80.00", "-24.20"),  # a data row
         ("Date", "Date", "Description", "Amount", "Balance"),  # duplicate column
+        ("Opening balance:", "80.60"),  # a summary row
     ],
 )
 def test_detect_columns_returns_none_for_non_headers(words: tuple[str, ...]) -> None:
@@ -110,3 +135,21 @@ def test_assign_cells_strips_and_joins_pieces_in_one_column() -> None:
     cells = assign_cells(row, LAYOUT_A)
 
     assert cells == {"date": "2026-03-09", "description": "City Transit"}
+
+
+def test_assign_cells_drops_values_under_an_unused_column() -> None:
+    columns = [
+        HeaderColumn("date", 40),
+        HeaderColumn(None, 100),  # "Ref"
+        HeaderColumn("description", 160),
+    ]
+    row = [
+        TextPiece(x=40, y=177, text="2026-03-09"),
+        TextPiece(x=100, y=177, text="A1B2"),
+        TextPiece(x=160, y=177, text="City Transit"),
+    ]
+
+    assert assign_cells(row, columns) == {
+        "date": "2026-03-09",
+        "description": "City Transit",
+    }

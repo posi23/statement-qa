@@ -50,7 +50,7 @@ def make_statement() -> StatementFactory:
             period_end=dt.date(2026, 3, 31),
             opening_balance=Decimal(opening),
             closing_balance=Decimal(closing) if closing is not None else last,
-            page_count=1,
+            page_count=max((t.page for t in transactions), default=1),
             transactions=tuple(transactions),
         )
 

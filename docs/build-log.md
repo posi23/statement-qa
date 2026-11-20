@@ -48,7 +48,14 @@ One entry per milestone: what I asked Claude Code for, what it produced, and wha
   - Before writing the parser, a spike confirmed that pypdf gives usable positions for fpdf2 output, so `pdfplumber` wasn't needed.
   - The first generated overdrawn statement stayed below zero almost all month. A forced payday about a sixth of the way through now makes it dip and recover.
   - All generated amounts are rounded to two decimal places.
-- **What I changed in review, and why:** (filled in after `review-pr`)
-- **Tests:** 76 pytest runs (24 planned cases plus a banner check, many parametrized). Every generated statement parses back exactly, including pages; the committed PDFs match the generator; and there are unit tests for amounts, dates, layout, reconcile and error paths. No network, no model calls.
-- **Known limit:** the summary parser expects the label and value as separate strings (`Opening balance:` then `10.00`), not one string `Opening balance: 10.00`.
+- **What I changed in review, and why:** `review-pr` raised 7 findings. Claude first suggested deferring the two "fails loudly" ones. I pushed back because they describe real statements, so all 7 were fixed before the PR:
+  - A page without its own header row used to be skipped, silently losing its transactions. It now reuses the previous page's columns, since many real statements print the header once.
+  - A row with money but an unreadable date (`2026-O3-09`) used to vanish. It now raises an error. Lines like `Balance brought forward`, `Closing balance` and `Total` are still skipped on purpose.
+  - Header matching now ignores units and punctuation (`Withdrawals ($)`) and knows common synonyms (`Money out`, `Paid in`, `Particulars`). Unknown columns such as `Ref` are ignored, so their values can't leak into a neighbouring column.
+  - The summary reads `Opening balance: 10.00` printed as one string as well as two.
+  - `ParsedStatement` rejects a period that ends before it starts and a transaction on a page past the end. The parser reports both as `StatementParseError`.
+  - Added tests for the row error paths that had none (debit and credit both filled, neither filled, empty description).
+  - Added a guard test that the app and parser never load the dev-only `fpdf2`, so a production install without dev packages (coming with Docker in M3) can't break.
+  - Checked that the new tests fail against the pre-review code.
+- **Tests:** 99 pytest runs. Every generated statement parses back exactly, including pages, and the committed PDFs match the generator. Hand-built PDFs cover each edge case above, alongside unit tests for amounts, dates, layout, models and reconcile. No network, no model calls.
 - **Time taken:** planned Nov 10–11, built Nov 20 with pauses for explanations.

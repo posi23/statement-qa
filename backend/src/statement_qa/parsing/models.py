@@ -6,9 +6,9 @@ so sums drift and balance checks fail on correct statements.
 
 import datetime as dt
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Transaction(BaseModel):
@@ -38,6 +38,22 @@ class ParsedStatement(BaseModel):
     closing_balance: Decimal
     page_count: int = Field(ge=1)
     transactions: tuple[Transaction, ...]
+
+    @model_validator(mode="after")
+    def _check_consistency(self) -> Self:
+        """Catch impossible statements before anything cites them."""
+        if self.period_start > self.period_end:
+            raise ValueError(
+                f"period starts {self.period_start} after it ends {self.period_end}"
+            )
+        for transaction in self.transactions:
+            # A citation to page 5 of a 3-page PDF would send readers nowhere.
+            if transaction.page > self.page_count:
+                raise ValueError(
+                    f"transaction on page {transaction.page} of a "
+                    f"{self.page_count}-page statement"
+                )
+        return self
 
 
 class BalanceMismatch(BaseModel):

@@ -5,20 +5,33 @@ functions group strings that share a line into rows and match each string to
 the column header it sits under.
 """
 
+import re
 from typing import Literal, NamedTuple
 
 Column = Literal["date", "description", "debit", "credit", "amount", "balance"]
 
-# Header words seen across statement layouts, mapped to what the column holds.
+# Header words seen on statements, mapped to what the column holds. Keys are
+# in `normalise_label` form, so `Withdrawals ($)` matches `withdrawals`.
 HEADER_WORDS: dict[str, Column] = {
     "date": "date",
+    "transaction date": "date",
+    "posting date": "date",
     "description": "description",
     "details": "description",
     "transaction": "description",
+    "particulars": "description",
     "withdrawals": "debit",
+    "withdrawal": "debit",
     "debit": "debit",
+    "debits": "debit",
+    "money out": "debit",
+    "paid out": "debit",
     "deposits": "credit",
+    "deposit": "credit",
     "credit": "credit",
+    "credits": "credit",
+    "money in": "credit",
+    "paid in": "credit",
     "amount": "amount",
     "balance": "balance",
 }
@@ -39,6 +52,27 @@ class TextPiece(NamedTuple):
     text: str
 
 
+class HeaderColumn(NamedTuple):
+    """One column of a table header.
+
+    `name` is None for a column we don't use, such as `Ref`. Keeping it still
+    matters: values under it go nowhere instead of into a neighbouring column.
+    """
+
+    name: Column | None
+    x: float
+
+
+def normalise_label(text: str) -> str:
+    """Lowercase, drop anything in brackets and keep only letters and single spaces.
+
+    `Withdrawals ($)` -> `withdrawals`, `Opening Balance:` -> `opening balance`.
+    """
+    without_units = re.sub(r"\(.*?\)", " ", text.lower())
+    letters_only = re.sub(r"[^a-z]+", " ", without_units)
+    return " ".join(letters_only.split())
+
+
 def group_rows(
     pieces: list[TextPiece], tolerance: float = ROW_TOLERANCE
 ) -> list[list[TextPiece]]:
@@ -52,26 +86,30 @@ def group_rows(
     return [sorted(row, key=lambda p: p.x) for row in rows]
 
 
-def detect_columns(row: list[TextPiece]) -> dict[Column, float] | None:
-    """Return each column's x position if `row` is a table header, else None.
+def detect_columns(row: list[TextPiece]) -> list[HeaderColumn] | None:
+    """Return the row's columns if it's a transaction table header, else None.
 
     A header needs a date, a description and a balance column, plus either a
-    signed amount column or both debit and credit columns.
+    signed amount column or both debit and credit columns. Unrecognised words
+    become unused columns rather than disqualifying the row.
     """
-    columns: dict[Column, float] = {}
+    columns: list[HeaderColumn] = []
+    seen: set[Column] = set()
     for piece in row:
-        column = HEADER_WORDS.get(piece.text.strip().lower())
-        if column is None or column in columns:
-            return None
-        columns[column] = piece.x
-    has_money = "amount" in columns or {"debit", "credit"} <= columns.keys()
-    if {"date", "description", "balance"} <= columns.keys() and has_money:
+        name = HEADER_WORDS.get(normalise_label(piece.text))
+        if name is not None:
+            if name in seen:
+                return None
+            seen.add(name)
+        columns.append(HeaderColumn(name=name, x=piece.x))
+    has_money = "amount" in seen or {"debit", "credit"} <= seen
+    if {"date", "description", "balance"} <= seen and has_money:
         return columns
     return None
 
 
 def assign_cells(
-    row: list[TextPiece], columns: dict[Column, float]
+    row: list[TextPiece], columns: list[HeaderColumn]
 ) -> dict[Column, str]:
     """Put each piece in the column whose header starts nearest to it.
 
@@ -81,7 +119,11 @@ def assign_cells(
     """
     cells: dict[Column, str] = {}
     for piece in row:
-        column = min(columns, key=lambda name: abs(columns[name] - piece.x))
+        nearest = min(columns, key=lambda column: abs(column.x - piece.x))
+        if nearest.name is None:
+            continue
         text = piece.text.strip()
-        cells[column] = f"{cells[column]} {text}" if column in cells else text
+        cells[nearest.name] = (
+            f"{cells[nearest.name]} {text}" if nearest.name in cells else text
+        )
     return cells
