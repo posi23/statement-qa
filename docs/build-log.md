@@ -32,7 +32,7 @@ One entry per milestone: what I asked Claude Code for, what it produced, and wha
 - **Tests:** 3 pytest tests for `/health` (status and body, 405 on POST, OpenAPI response model).
 - **Time taken:** about 30 minutes from plan to open PR (planning began around 15:00, PR opened 15:29), plus review time before merge.
 
-### M2: synthetic statements and parsing (PR link added when opened)
+### M2: synthetic statements and parsing ([PR #2](https://github.com/posi23/statement-qa/pull/2))
 
 - **Asked for:** a generator for 5–10 fake statement PDFs (different layouts, 2–4 pages, some overdrawn) and a parser that turns each PDF into Pydantic `Transaction` rows with the page they came from. Generator first, then the parser, with the `write-tests` skill for the tests.
 - **Plan changes I made:**
