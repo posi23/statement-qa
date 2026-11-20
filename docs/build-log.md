@@ -31,3 +31,31 @@ One entry per milestone: what I asked Claude Code for, what it produced, and wha
     - Removed a schema test that only repeated the body check, so it couldn't fail on its own.
 - **Tests:** 3 pytest tests for `/health` (status and body, 405 on POST, OpenAPI response model).
 - **Time taken:** about 30 minutes from plan to open PR (planning began around 15:00, PR opened 15:29), plus review time before merge.
+
+### M2: synthetic statements and parsing ([PR #2](https://github.com/posi23/statement-qa/pull/2))
+
+- **Asked for:** a generator for 5–10 fake statement PDFs (different layouts, 2–4 pages, some overdrawn) and a parser that turns each PDF into Pydantic `Transaction` rows with the page they came from. Generator first, then the parser, with the `write-tests` skill for the tests.
+- **Plan changes I made:**
+  - Approved `pypdf` (runtime) and `fpdf2` (dev only), the picks PLAN.md recommends, over `pdfplumber` and `reportlab`.
+  - Asked what the PDFs are and whether they should be public. They're entirely invented, so they're committed, but every page now carries a `SYNTHETIC SAMPLE - NOT A REAL STATEMENT` banner so nobody mistakes one for a real document.
+  - Asked for each step to be explained by following one concrete row through the code, instead of a box-and-arrow overview.
+- **What Claude built:**
+  - `statement_qa.synthetic`: `build_specs(seed)` makes 6 statements (3 layouts x 2), each with an `expected` `ParsedStatement` that serves as the answer key. `render_pdf` draws them with fpdf2. `python -m statement_qa.synthetic --out ...` writes them to `data/synthetic/`. Output is byte-identical between runs.
+  - The three layouts differ in columns (Withdrawals/Deposits, signed Amount, Debit/Credit), date format (`2026-03-04`, `04 Mar 2026`, `Mar 04` with the year from the period) and how overdrafts print (`-24.20`, `24.20 OD`, `($24.20)`). One statement crosses the new year, and one has a deliberately misprinted balance.
+  - `statement_qa.parsing`: pypdf reports each string with its x/y position. The parser groups strings into rows by y and assigns each one to the column whose header starts nearest. That's how a lone `80.00` is known to be a withdrawal, without guessing from the balance.
+  - `find_balance_mismatches` compares each printed balance with opening balance plus amounts so far, so one typo is flagged once. M6's agent will reuse it.
+- **Mid-build changes:**
+  - Before writing the parser, a spike confirmed that pypdf gives usable positions for fpdf2 output, so `pdfplumber` wasn't needed.
+  - The first generated overdrawn statement stayed below zero almost all month. A forced payday about a sixth of the way through now makes it dip and recover.
+  - All generated amounts are rounded to two decimal places.
+- **What I changed in review, and why:** `review-pr` raised 7 findings. Claude first suggested deferring the two "fails loudly" ones. I pushed back because they describe real statements, so all 7 were fixed before the PR:
+  - A page without its own header row used to be skipped, silently losing its transactions. It now reuses the previous page's columns, since many real statements print the header once.
+  - A row with money but an unreadable date (`2026-O3-09`) used to vanish. It now raises an error. Lines like `Balance brought forward`, `Closing balance` and `Total` are still skipped on purpose.
+  - Header matching now ignores units and punctuation (`Withdrawals ($)`) and knows common synonyms (`Money out`, `Paid in`, `Particulars`). Unknown columns such as `Ref` are ignored, so their values can't leak into a neighbouring column.
+  - The summary reads `Opening balance: 10.00` printed as one string as well as two.
+  - `ParsedStatement` rejects a period that ends before it starts and a transaction on a page past the end. The parser reports both as `StatementParseError`.
+  - Added tests for the row error paths that had none (debit and credit both filled, neither filled, empty description).
+  - Added a guard test that the app and parser never load the dev-only `fpdf2`, so a production install without dev packages (coming with Docker in M3) can't break.
+  - Checked that the new tests fail against the pre-review code.
+- **Tests:** 99 pytest runs. Every generated statement parses back exactly, including pages, and the committed PDFs match the generator. Hand-built PDFs cover each edge case above, alongside unit tests for amounts, dates, layout, models and reconcile. No network, no model calls.
+- **Time taken:** planned Nov 10–11, built Nov 20 with pauses for explanations.
