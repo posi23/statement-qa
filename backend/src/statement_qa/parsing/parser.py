@@ -24,7 +24,20 @@ from statement_qa.parsing.models import ParsedStatement, Transaction
 from statement_qa.parsing.reader import read_pages
 from statement_qa.parsing.values import parse_amount, parse_full_date, parse_row_date
 
-_SUMMARY_LABELS = ("statement period", "opening balance", "closing balance")
+_SUMMARY_LABELS: dict[str, str] = {
+    "account": "account",
+    "account number": "account",
+    "account no": "account",
+    "statement period": "statement period",
+    "opening balance": "opening balance",
+    "closing balance": "closing balance",
+}
+_REQUIRED_SUMMARY = (
+    "account",
+    "statement period",
+    "opening balance",
+    "closing balance",
+)
 
 # Lines inside the table that carry money but aren't transactions.
 _BALANCE_LINES = frozenset(
@@ -84,6 +97,7 @@ def parse_statement(pdf: bytes, statement_id: str) -> ParsedStatement:
     try:
         return ParsedStatement(
             statement_id=statement_id,
+            account_number=summary["account"],
             period_start=period_start,
             period_end=period_end,
             opening_balance=_amount(summary["opening balance"], "opening balance"),
@@ -105,9 +119,10 @@ def _read_summary(rows: list[list[TextPiece]]) -> dict[str, str]:
         label, _, rest = row[0].text.partition(":")
         parts = [rest, *(piece.text for piece in row[1:])]
         value = " ".join(part.strip() for part in parts if part.strip())
-        if normalise_label(label) in _SUMMARY_LABELS and value:
-            summary[normalise_label(label)] = value
-    missing = [label for label in _SUMMARY_LABELS if label not in summary]
+        field = _SUMMARY_LABELS.get(normalise_label(label))
+        if field is not None and value:
+            summary[field] = value
+    missing = [field for field in _REQUIRED_SUMMARY if field not in summary]
     if missing:
         raise StatementParseError(f"summary is missing: {', '.join(missing)}")
     return summary

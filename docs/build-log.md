@@ -46,7 +46,7 @@ One entry per milestone: what I asked Claude Code for, what it produced, and wha
   - `find_balance_mismatches` compares each printed balance with opening balance plus amounts so far, so one typo is flagged once. M6's agent will reuse it.
 - **Mid-build changes:**
   - Before writing the parser, a spike confirmed that pypdf gives usable positions for fpdf2 output, so `pdfplumber` wasn't needed.
-  - The first generated overdrawn statement stayed below zero almost all month. A forced payday about a sixth of the way through now makes it dip and recover.
+  - The first generated overdrawn statement stayed below zero almost all month. A forced payday partway through fixed it at first; this was later replaced by the recurring schedule below.
   - All generated amounts are rounded to two decimal places.
 - **What I changed in review, and why:** `review-pr` raised 7 findings. Claude first suggested deferring the two "fails loudly" ones. I pushed back because they describe real statements, so all 7 were fixed before the PR:
   - A page without its own header row used to be skipped, silently losing its transactions. It now reuses the previous page's columns, since many real statements print the header once.
@@ -57,5 +57,10 @@ One entry per milestone: what I asked Claude Code for, what it produced, and wha
   - Added tests for the row error paths that had none (debit and credit both filled, neither filled, empty description).
   - Added a guard test that the app and parser never load the dev-only `fpdf2`, so a production install without dev packages (coming with Docker in M3) can't break.
   - Checked that the new tests fail against the pre-review code.
-- **Tests:** 99 pytest runs. Every generated statement parses back exactly, including pages, and the committed PDFs match the generator. Hand-built PDFs cover each edge case above, alongside unit tests for amounts, dates, layout, models and reconcile. No network, no model calls.
-- **Time taken:** planned Nov 10–11, built Nov 20 with pauses for explanations.
+- **What I changed while reviewing the open PR, and why:**
+  - **A real identifier.** I asked whether the statement id should be a proper identifier instead of the file name, since a rename would make the same statement look new. In the real world, a statement is identified by its account and period, so the parser now reads `account_number` (accepting `Account`, `Account number`, `Account no.`, `Account #`) and requires it. Choosing the database uniqueness key and adding a content hash is left to M3, where uniqueness is enforced.
+  - **Recurring bills.** I didn't understand "merchants are picked at random" at first. It meant every row picked any merchant, so one June statement had 12 electricity bills, and rent was missing from half the statements. That would have made M5 questions like "what was my electricity bill?" meaningless. Rent (1st), electricity (8th), phone (20th) and pay (15th and last day, the same salary both times) now recur on fixed days. Only everyday spending is random.
+  - **Budget fitting.** With recurring pay, a busy 3-page month spent more than two paychecks and never recovered. Everyday spending is now scaled down when needed, so each month roughly balances (closing ≈ opening + a small saving). The three overdrawn statements dip after rent: two recover on the 15th and one on the 30th.
+  - The six PDFs were regenerated; the answer-key tests confirmed nothing else changed.
+- **Tests:** 131 pytest runs. Every generated statement parses back exactly, including pages and account number, and the committed PDFs match the generator. Generator tests check the recurring schedule, including the Dec–Jan statement and month-end dates. Hand-built PDFs cover each parser edge case, alongside unit tests for amounts, dates, layout, models and reconcile. No network, no model calls.
+- **Time taken:** planned Nov 10–11, built Nov 20, review changes Nov 21, with pauses for explanations.

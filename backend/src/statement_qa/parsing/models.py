@@ -32,6 +32,8 @@ class ParsedStatement(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     statement_id: str = Field(min_length=1)
+    # With the period, this is what identifies a statement in the real world.
+    account_number: str = Field(min_length=1)
     period_start: dt.date
     period_end: dt.date
     opening_balance: Decimal

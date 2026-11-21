@@ -17,6 +17,7 @@ def _statement(
 ) -> ParsedStatement:
     return ParsedStatement(
         statement_id="test-statement",
+        account_number="000-00000-99",
         period_start=period_start,
         period_end=period_end,
         opening_balance=Decimal("100.00"),

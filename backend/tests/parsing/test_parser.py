@@ -102,7 +102,9 @@ def _pdf(*pages: list[Row], spacing: float = 120) -> bytes:
     return bytes(pdf.output())
 
 
+ACCOUNT: Row = ("Account:", "000-00000-99")
 SUMMARY: list[Row] = [
+    ACCOUNT,
     ("Statement period:", "2026-03-01 to 2026-03-31"),
     ("Opening balance:", "100.00"),
     ("Closing balance:", "36.00"),
@@ -185,6 +187,7 @@ def test_row_without_a_description_raises() -> None:
 def test_summary_label_and_value_in_one_string() -> None:
     pdf = _pdf(
         [
+            ("Account: 000-00000-99",),
             ("Statement period: 2026-03-01 to 2026-03-31",),
             ("Opening balance: 100.00",),
             ("Closing balance: 96.00",),
@@ -195,10 +198,41 @@ def test_summary_label_and_value_in_one_string() -> None:
 
     parsed = parse_statement(pdf, "one-string-summary")
 
-    assert (parsed.period_start, parsed.opening_balance) == (
+    assert (parsed.account_number, parsed.period_start, parsed.opening_balance) == (
+        "000-00000-99",
         dt.date(2026, 3, 1),
         Decimal("100.00"),
     )
+
+
+@pytest.mark.parametrize(
+    "label", ["Account:", "Account number:", "Account No.:", "Account #:"]
+)
+def test_account_number_label_variants(label: str) -> None:
+    pdf = _pdf(
+        [
+            (label, "000-00000-99"),
+            *SUMMARY[1:],
+            HEADER,
+            ("2026-03-02", "Coffee Corner", "4.00", "", "96.00"),
+        ]
+    )
+
+    assert parse_statement(pdf, "account-label").account_number == "000-00000-99"
+
+
+def test_account_holder_is_not_mistaken_for_the_account_number() -> None:
+    pdf = _pdf(
+        [
+            ("Account holder:", "Alex Sample"),
+            *SUMMARY[1:],
+            HEADER,
+            ("2026-03-02", "Coffee Corner", "4.00", "", "96.00"),
+        ]
+    )
+
+    with pytest.raises(StatementParseError, match="summary is missing: account"):
+        parse_statement(pdf, "holder-only")
 
 
 def test_unit_suffixes_synonyms_and_unused_columns() -> None:
@@ -220,6 +254,7 @@ def test_unit_suffixes_synonyms_and_unused_columns() -> None:
 def test_inconsistent_statement_raises_a_parse_error() -> None:
     pdf = _pdf(
         [
+            ACCOUNT,
             ("Statement period:", "2026-03-31 to 2026-03-01"),
             ("Opening balance:", "100.00"),
             ("Closing balance:", "96.00"),

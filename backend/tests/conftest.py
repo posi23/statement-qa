@@ -46,6 +46,7 @@ def make_statement() -> StatementFactory:
         last = transactions[-1].balance if transactions else Decimal(opening)
         return ParsedStatement(
             statement_id="test-statement",
+            account_number="000-00000-99",
             period_start=dt.date(2026, 3, 1),
             period_end=dt.date(2026, 3, 31),
             opening_balance=Decimal(opening),

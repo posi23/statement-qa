@@ -139,7 +139,7 @@ def render_pdf(spec: StatementSpec) -> bytes:
                 pdf,
                 (
                     ("Account holder:", spec.holder),
-                    ("Account:", spec.account_number),
+                    ("Account:", expected.account_number),
                     ("Statement period:", period),
                     ("Opening balance:", style.balance(expected.opening_balance)),
                     ("Closing balance:", style.balance(expected.closing_balance)),
