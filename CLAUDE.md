@@ -26,6 +26,7 @@ uv run uvicorn statement_qa.main:app --reload   # dev server on :8000
 uv run pytest                                   # tests
 uv run ruff check .                             # lint
 uv run ruff format .                            # format (CI runs --check)
+uv run python -m statement_qa.synthetic --out ../data/synthetic   # regenerate sample PDFs
 ```
 
 ## How we work
