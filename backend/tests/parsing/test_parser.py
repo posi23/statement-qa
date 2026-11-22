@@ -155,6 +155,21 @@ def test_balance_lines_and_footers_are_skipped() -> None:
     parsed = parse_statement(pdf, "balance-lines")
 
     assert [t.description for t in parsed.transactions] == ["Coffee Corner"]
+    # The summary says 36.00; the table's own `Closing balance 96.00` must not win.
+    assert parsed.closing_balance == Decimal("36.00")
+
+
+@pytest.mark.parametrize("label", ["Opening balance", "Closing balance"])
+def test_balance_line_in_the_table_does_not_override_the_summary(label: str) -> None:
+    pdf = _one_page(
+        ("2026-03-02", "Coffee Corner", "4.00", "", "96.00"),
+        ("", label, "", "", "999.00"),
+    )
+
+    parsed = parse_statement(pdf, "table-balance")
+
+    assert parsed.opening_balance == Decimal("100.00")
+    assert parsed.closing_balance == Decimal("36.00")
 
 
 def test_row_with_money_and_an_unreadable_date_raises() -> None:

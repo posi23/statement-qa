@@ -24,6 +24,7 @@ from statement_qa.parsing.models import ParsedStatement, Transaction
 from statement_qa.parsing.reader import read_pages
 from statement_qa.parsing.values import parse_amount, parse_full_date, parse_row_date
 
+# Printed summary label (in `normalise_label` form) -> the field it fills.
 _SUMMARY_LABELS: dict[str, str] = {
     "account": "account",
     "account number": "account",
@@ -72,14 +73,19 @@ def parse_statement(pdf: bytes, statement_id: str) -> ParsedStatement:
     if not pages:
         raise StatementParseError("PDF has no pages")
 
-    summary = _read_summary(pages[0])
+    # Only rows above the table count as summary, so a `Closing balance` line
+    # inside the table can't overwrite the printed summary value.
+    first_header = _find_header(pages[0])
+    summary_rows = pages[0] if first_header is None else pages[0][: first_header[0]]
+    summary = _read_summary(summary_rows)
     period_start, period_end = _parse_period(summary["statement period"])
     columns: list[HeaderColumn] | None = None
     transactions: list[Transaction] = []
     for page_number, rows in enumerate(pages, start=1):
-        table = _find_table(rows)
-        if table is not None:
-            columns, body = table
+        header = _find_header(rows)
+        if header is not None:
+            header_index, columns = header
+            body = rows[header_index + 1 :]
         elif columns is not None:
             # Many statements print the header on the first page only.
             body = rows
@@ -110,7 +116,7 @@ def parse_statement(pdf: bytes, statement_id: str) -> ParsedStatement:
 
 
 def _read_summary(rows: list[list[TextPiece]]) -> dict[str, str]:
-    """Find `Label: value` rows on the first page.
+    """Find `Label: value` rows in the summary above the first page's table.
 
     The label and value may be separate strings or one string split at `:`.
     """
@@ -146,14 +152,14 @@ def _amount(text: str, what: str) -> Decimal:
         raise StatementParseError(f"bad {what}: {error}") from error
 
 
-def _find_table(
+def _find_header(
     rows: list[list[TextPiece]],
-) -> tuple[list[HeaderColumn], list[list[TextPiece]]] | None:
-    """Return the header's columns and the rows below it, or None if no header."""
+) -> tuple[int, list[HeaderColumn]] | None:
+    """Return the first header row's index and its columns, or None if no header."""
     for index, row in enumerate(rows):
         columns = detect_columns(row)
         if columns is not None:
-            return columns, rows[index + 1 :]
+            return index, columns
     return None
 
 
